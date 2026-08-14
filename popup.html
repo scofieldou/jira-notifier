@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-Hant">
+    <head>
+        <meta charset="utf-8" />
+        <style>
+            :root {
+                --text: #172b4d;
+                --subtle: #6b778c;
+                --border: #dfe1e6;
+                --hover: #f4f5f7;
+            }
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                width: 380px;
+                max-height: 560px;
+                margin: 0;
+                display: flex;
+                flex-direction: column;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 13px;
+                color: var(--text);
+                background: #fff;
+            }
+            header {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 12px;
+                border-bottom: 1px solid var(--border);
+                flex: none;
+            }
+            header h1 {
+                margin: 0;
+                font-size: 13px;
+                font-weight: 600;
+                flex: 1;
+            }
+            #sync-state {
+                font-size: 11px;
+                color: var(--subtle);
+            }
+            #refresh {
+                border: 1px solid var(--border);
+                background: #fff;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                cursor: pointer;
+                color: var(--text);
+            }
+            #refresh:hover:not(:disabled) {
+                background: var(--hover);
+            }
+            #refresh:disabled {
+                color: var(--subtle);
+                cursor: default;
+            }
+            main {
+                overflow-y: auto;
+                flex: 1;
+            }
+            .group-head {
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
+                padding: 8px 12px 4px;
+                background: #fafbfc;
+                border-bottom: 1px solid var(--border);
+                position: sticky;
+                top: 0;
+                cursor: pointer;
+                user-select: none;
+            }
+            .group-head:hover {
+                background: #f1f2f4;
+            }
+            .caret {
+                display: inline-block;
+                font-size: 9px;
+                color: var(--subtle);
+                transition: transform 0.12s ease;
+                width: 9px;
+            }
+            .group-head.collapsed .caret {
+                transform: rotate(-90deg);
+            }
+            .group-body.collapsed {
+                display: none;
+            }
+            .group-key {
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+            }
+            .group-name {
+                font-size: 11px;
+                color: var(--subtle);
+                flex: 1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .group-count {
+                font-size: 11px;
+                color: var(--subtle);
+            }
+            .issue {
+                display: flex;
+                gap: 8px;
+                padding: 8px 12px;
+                border-bottom: 1px solid var(--border);
+                cursor: pointer;
+                align-items: flex-start;
+            }
+            .issue:hover {
+                background: var(--hover);
+            }
+            .dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                margin-top: 4px;
+                flex: none;
+            }
+            .issue-body {
+                flex: 1;
+                min-width: 0;
+            }
+            .issue-top {
+                display: flex;
+                gap: 6px;
+                align-items: baseline;
+            }
+            .key {
+                font-weight: 600;
+                font-size: 12px;
+                color: #0c66e4;
+            }
+            .prio {
+                font-size: 11px;
+                color: var(--subtle);
+            }
+            .summary {
+                margin-top: 2px;
+                line-height: 1.35;
+                word-break: break-word;
+            }
+            .meta {
+                margin-top: 4px;
+                display: flex;
+                gap: 6px;
+                align-items: center;
+                flex-wrap: wrap;
+            }
+            .chip {
+                font-size: 10px;
+                padding: 1px 6px;
+                border-radius: 3px;
+                background: #dfe1e6;
+                color: #42526e;
+            }
+            .due {
+                font-size: 10px;
+                color: #ae2e24;
+            }
+            .empty,
+            .problem {
+                padding: 28px 20px;
+                text-align: center;
+                color: var(--subtle);
+                line-height: 1.6;
+            }
+            .problem strong {
+                display: block;
+                color: var(--text);
+                margin-bottom: 6px;
+            }
+            .problem button {
+                margin-top: 10px;
+                border: 0;
+                border-radius: 4px;
+                background: #0c66e4;
+                color: #fff;
+                padding: 7px 14px;
+                font-size: 12px;
+                cursor: pointer;
+            }
+            footer {
+                flex: none;
+                padding: 8px 12px;
+                border-top: 1px solid var(--border);
+            }
+            .setting {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 7px;
+            }
+            .setting label {
+                font-size: 11px;
+                color: var(--subtle);
+            }
+            .setting select {
+                flex: 1;
+                font-size: 11px;
+                font-family: inherit;
+                color: var(--text);
+                padding: 3px 4px;
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                background: #fff;
+                cursor: pointer;
+            }
+            footer a {
+                font-size: 11px;
+                color: #0c66e4;
+                text-decoration: none;
+                cursor: pointer;
+            }
+            footer a:hover {
+                text-decoration: underline;
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1>指派給我的單</h1>
+            <span id="sync-state"></span>
+            <button id="refresh">重新整理</button>
+        </header>
+        <main id="list"></main>
+        <footer>
+            <div class="setting">
+                <label for="threshold">通知門檻</label>
+                <select id="threshold">
+                    <option value="99">全部</option>
+                    <option value="4">Low 以上</option>
+                    <option value="3">Medium 以上</option>
+                    <option value="2">High 以上</option>
+                    <option value="1">僅 Highest</option>
+                </select>
+            </div>
+            <a id="open-all">在 Jira 開啟完整清單 →</a>
+        </footer>
+        <script src="config.js"></script>
+        <script src="popup.js"></script>
+    </body>
+</html>

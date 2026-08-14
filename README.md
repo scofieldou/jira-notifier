@@ -1,0 +1,130 @@
+# Jira Notifier
+
+被指派 Jira 單時在桌面右下角跳通知的 Chrome 擴充功能，另附一個依專案分組的待辦清單。
+
+針對**自架 Jira Server** 設計（開發時的對象是 8.6.1）。Atlassian 官方的 Remote MCP Server 與各種 token 方案都只服務 Jira Cloud，自架環境用不上。
+
+## 為什麼是瀏覽器擴充功能
+
+這是整個專案唯一重要的設計決定，其餘都是細節。
+
+Jira Server 8.14 以前**沒有 Personal Access Token**，能用的認證只有帳號密碼或 session cookie。任何跑在瀏覽器外的方案（排程腳本、Electron、Python 常駐程式）都得自己保管憑證——在沒有 PAT 的情況下，那就是使用者的主密碼，而且若 Jira 走的是 HTTP，每次輪詢都會把它明文送上網路。
+
+擴充功能不需要憑證。它跑在使用者已登入的瀏覽器裡，請求自動帶上既有的 session cookie，登入過期時使用者照常登入 Jira 即可恢復。**這個 repo 裡沒有任何密碼、token 或設定檔存放秘密。**
+
+附帶解決的還有兩件事：擴充功能宣告 `host_permissions` 後不受 CORS 限制，也不受 HTTPS 頁面呼叫 HTTP 端點的混合內容封鎖。
+
+## 安裝
+
+完整步驟與疑難排解見 **[SETUP.md](SETUP.md)**。摘要：
+
+1. `git clone` 到一個**不會被移動或刪除**的位置（Chrome 直接讀取這個資料夾）
+2. 複製 `config.example.js` 為 `config.js`，填入你的 Jira 位址
+3. 把 `manifest.json` 的 `host_permissions` 改成同一個位址（該欄位必須是靜態字面值，讀不到設定檔）
+4. `chrome://extensions` → 開啟**開發人員模式** → **載入未封裝項目** → 選這個資料夾
+
+前置條件：同一個瀏覽器設定檔要處於 **Jira 已登入**狀態。
+
+未上架 Chrome 線上應用程式商店，所以 Chrome 偶爾會在啟動時詢問是否停用開發人員模式擴充功能，選擇保留即可。
+
+## 使用
+
+**通知** — 指派給你的未結案清單出現新單號時跳出。點擊通知直接開啟該單。通知會停留在畫面上直到你處理它（`requireInteraction`）。
+
+**清單** — 點工具列圖示開啟。依專案分組，組內依優先度由高到低排列。點專案標題可收合該組，收合狀態會保留。點任一列開啟該單。
+
+**徽章** — 圖示上的數字是目前未結案的單量。紅色 `!` 表示 Jira 登入已過期，藍色數字以外的狀況見下方疑難排解。
+
+**通知門檻** — popup 底部可設定只有某個優先度以上才跳通知。門檻只影響通知，清單與徽章仍顯示全部。
+
+## 設定
+
+改完任何一項，回到 `chrome://extensions` 按重新整理（↻）套用。
+
+| 位置 | 常數 | 說明 |
+| --- | --- | --- |
+| `config.js` | `baseUrl` | Jira 站台位址。不進版控，由 `config.example.js` 複製而來 |
+| `manifest.json` | `host_permissions` | 同一個位址，結尾加 `/*`。未涵蓋的網域一律擋掉 |
+| `background.js` | `JQL` | 要追蹤的查詢條件 |
+| `background.js` | `POLL_MINUTES` | 輪詢間隔，Chrome 下限為 0.5 |
+
+`JQL` 預設為 `assignee = currentUser() AND resolution = Unresolved`。想連已結案的單也追蹤就拿掉 `resolution` 那段，但清單會相應變長。
+
+## 運作方式
+
+Manifest V3 的 service worker **不常駐**，閒置約 30 秒後會被 Chrome 回收。`chrome.alarms` 負責定期喚醒它：
+
+```
+alarm（每 POLL_MINUTES 分鐘）
+  └ 喚醒 service worker
+      └ fetch /rest/api/2/search（cookie 自動附帶）
+          └ 與 storage 中的 seenKeys 比對
+              └ 有新單號 → 過濾通知門檻 → chrome.notifications
+                  └ 更新 seenKeys、issues、徽章
+```
+
+幾個刻意的行為：
+
+- **偵測靠單號集合的差異，不靠時間戳。** 單子可能是幾個月前開的、今天才轉到你身上，`created` 抓不到；而 `updated` 會被任何留言或欄位變更觸發，一天會吵很多次。
+- **首次執行只建立基準、不發通知**，否則安裝當下會被既有的單洗版。
+- **撈取失敗時不更新 `seenKeys`**，避免斷線恢復後把整份清單當成新單全部通知一次。
+- **被門檻擋下的單仍然記入基準**，所以事後放寬門檻不會湧出一堆舊單的通知。
+- **沒有設定優先度的單一律通知。** 欄位沒填不代表不重要。
+- 通知 id 直接使用單號，且**建立前會先清除同 id 的舊通知**——`requireInteraction` 的通知不會自動消失，而以相同 id 重複建立只會靜默更新既有那則、不會再次彈出。
+
+`storage.local` 中保存的鍵：`issues`、`seenKeys`、`lastSync`、`collapsed`、`notifyThreshold`、`pollLog`。全部都是非敏感資料。
+
+## 疑難排解
+
+診斷指令請在 service worker 的 console 執行：`chrome://extensions` → 本擴充功能卡片 → **service worker** 連結。
+
+**徽章顯示 `!`** — Jira session 過期。開啟 Jira 登入，下次輪詢自動恢復，不需重新安裝。
+
+**通知沒跳出來** — 先確認是「沒建立」還是「建立了但沒顯示」：
+
+```js
+chrome.notifications.getAll().then(n => console.log(Object.keys(n)))
+```
+
+有列出單號代表擴充功能這端正常，問題在作業系統。檢查 Windows 的**專注輔助**是否開啟，以及「設定 → 系統 → 通知與動作」中 Chrome 是否被停用、「在螢幕上顯示通知橫幅」是否勾選。通知多半躺在重要訊息中心裡。
+
+**懷疑背景沒在跑** — 檢視最近的輪詢紀錄，標籤會標明是鬧鐘自動觸發還是手動：
+
+```js
+chrome.storage.local.get('pollLog').then(r => console.log(r.pollLog.join('\n')))
+```
+
+正常應該每 `POLL_MINUTES` 分鐘一筆 `[alarm]`。注意**開啟 popup 本身就會觸發一次同步**，觀察期間不要點圖示，否則紀錄會混入 `[manual]`。
+
+若完全沒有 `[alarm]`，確認鬧鐘存在：
+
+```js
+chrome.alarms.getAll().then(as => console.log(as))
+```
+
+**手動觸發一次通知** — 清空基準後同步，最近的單會被當成新單：
+
+```js
+chrome.storage.local.set({ seenKeys: [] }).then(() => sync('test'));
+```
+
+## 限制
+
+- **輪詢，不是推播。** 延遲最多一個輪詢週期。即時推送需要 Jira webhook，而擴充功能沒有可被連線的端點，架構上做不到。
+- **需要 Chrome 在執行。** 關閉所有視窗後仍要運作的話，開啟 `chrome://settings/system` 的「關閉 Google Chrome 時繼續執行背景應用程式」，並以關閉視窗而非「離開」的方式收起瀏覽器。
+- **只認得出現在 JQL 結果中的單。** 指派後在下次輪詢前就被結案的單不會通知。
+- 僅在 Jira Server 8.6.1 上驗證過。Jira Cloud 的 REST 回應格式不同（描述欄為 ADF），未支援。
+
+## 檔案
+
+| 檔案 | 內容 |
+| --- | --- |
+| `manifest.json` | 權限與進入點宣告 |
+| `config.example.js` | 設定範本，複製為 `config.js` 後填入位址 |
+| `config.js` | 各自環境的 Jira 位址，**不進版控** |
+| `background.js` | service worker：輪詢、差異比對、通知、徽章 |
+| `popup.html` / `popup.js` | 清單 UI 與通知門檻設定 |
+| `icons/` | 16 / 32 / 48 / 128 四種尺寸 |
+| `SETUP.md` | 安裝與設定教學 |
+
+無建置流程、無相依套件。改完直接重新載入擴充功能即可。
