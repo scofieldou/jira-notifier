@@ -192,26 +192,19 @@
                 padding: 8px 12px;
                 border-top: 1px solid var(--border);
             }
-            .setting {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-bottom: 7px;
-            }
-            .setting label {
-                font-size: 11px;
+            .icon-btn {
+                border: 1px solid var(--border);
+                background: #fff;
+                border-radius: 4px;
+                padding: 3px 7px;
+                font-size: 12px;
+                line-height: 1.4;
+                cursor: pointer;
                 color: var(--subtle);
             }
-            .setting select {
-                flex: 1;
-                font-size: 11px;
-                font-family: inherit;
+            .icon-btn:hover {
+                background: var(--hover);
                 color: var(--text);
-                padding: 3px 4px;
-                border: 1px solid var(--border);
-                border-radius: 4px;
-                background: #fff;
-                cursor: pointer;
             }
             footer a {
                 font-size: 11px;
@@ -229,22 +222,10 @@
             <h1>指派給我的單</h1>
             <span id="sync-state"></span>
             <button id="refresh">重新整理</button>
+            <button id="open-options" class="icon-btn" title="設定">⚙</button>
         </header>
         <main id="list"></main>
-        <footer>
-            <div class="setting">
-                <label for="threshold">通知門檻</label>
-                <select id="threshold">
-                    <option value="99">全部</option>
-                    <option value="4">Low 以上</option>
-                    <option value="3">Medium 以上</option>
-                    <option value="2">High 以上</option>
-                    <option value="1">僅 Highest</option>
-                </select>
-            </div>
-            <a id="open-all">在 Jira 開啟完整清單 →</a>
-        </footer>
-        <script src="config.js"></script>
+        <footer><a id="open-all">在 Jira 開啟完整清單 →</a></footer>
         <script src="popup.js"></script>
     </body>
 </html>

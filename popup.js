@@ -1,5 +1,3 @@
-// config.js 不進版控，缺少時 script 載入會失敗，這裡拿到的就是 null
-const JIRA_BASE = globalThis.JIRA_CONFIG?.baseUrl ?? null;
 const JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY project ASC, priority DESC';
 
 const PRIORITY_COLOR = {
@@ -13,10 +11,11 @@ const PRIORITY_COLOR = {
 const list = document.getElementById('list');
 const syncState = document.getElementById('sync-state');
 const refreshBtn = document.getElementById('refresh');
-const thresholdSelect = document.getElementById('threshold');
 
 // popup 每次關閉都會整個銷毀，摺疊狀態得寫進 storage 才留得住
 let collapsed = new Set();
+// 位址存在設定裡，讀出來前所有連往 Jira 的連結都不成立
+let baseUrl = null;
 
 function openTab(url) {
     chrome.tabs.create({ url });
@@ -50,7 +49,7 @@ function groupByProject(issues) {
 
 function renderIssue(issue) {
     const row = el('div', 'issue');
-    row.addEventListener('click', () => openTab(`${JIRA_BASE}/browse/${issue.key}`));
+    row.addEventListener('click', () => openTab(`${baseUrl}/browse/${issue.key}`));
 
     const dot = el('span', 'dot');
     dot.style.background = PRIORITY_COLOR[issue.priorityRank] ?? '#8993a4';
@@ -74,12 +73,24 @@ function renderIssue(issue) {
 function renderProblem(lastSync) {
     const box = el('div', 'problem');
 
+    const openOptions = (text) => {
+        const btn = el('button', null, text);
+        btn.addEventListener('click', () => chrome.runtime.openOptionsPage());
+        box.append(btn);
+        list.replaceChildren(box);
+    };
+
     if (lastSync?.reason === 'config') {
         box.append(el('strong', null, '尚未設定 Jira 位址'));
-        box.append(
-            document.createTextNode('複製 config.example.js 為 config.js 並填入位址，再依 SETUP.md 修改 manifest.json。')
-        );
-        list.replaceChildren(box);
+        box.append(document.createTextNode('到設定頁填入你的 Jira 站台位址後即可開始運作。'));
+        openOptions('開啟設定');
+        return;
+    }
+
+    if (lastSync?.reason === 'permission') {
+        box.append(el('strong', null, '缺少存取權限'));
+        box.append(document.createTextNode('尚未授權存取這個 Jira 網域，請到設定頁重新儲存位址。'));
+        openOptions('開啟設定');
         return;
     }
 
@@ -87,7 +98,7 @@ function renderProblem(lastSync) {
         box.append(el('strong', null, '尚未登入 Jira'));
         box.append(document.createTextNode('session 已過期或未登入，登入後會自動恢復。'));
         const btn = el('button', null, '開啟 Jira 登入');
-        btn.addEventListener('click', () => openTab(JIRA_BASE));
+        btn.addEventListener('click', () => openTab(baseUrl));
         box.append(btn);
     } else {
         box.append(el('strong', null, '連不上 Jira'));
@@ -157,9 +168,10 @@ function renderSyncState(lastSync) {
 }
 
 async function paint() {
-    const stored = await chrome.storage.local.get(['issues', 'lastSync', 'collapsed']);
+    const stored = await chrome.storage.local.get(['issues', 'lastSync', 'collapsed', 'baseUrl']);
     const { issues, lastSync } = stored;
     collapsed = new Set(Array.isArray(stored.collapsed) ? stored.collapsed : []);
+    baseUrl = stored.baseUrl ?? null;
     render(issues, lastSync);
     renderSyncState(lastSync);
 }
@@ -172,21 +184,16 @@ async function sync() {
     refreshBtn.disabled = false;
 }
 
-async function loadThreshold() {
-    const { notifyThreshold } = await chrome.storage.local.get('notifyThreshold');
-    thresholdSelect.value = String(notifyThreshold ?? 99);
-}
+refreshBtn.addEventListener('click', sync);
 
-thresholdSelect.addEventListener('change', () => {
-    chrome.storage.local.set({ notifyThreshold: Number(thresholdSelect.value) });
+document.getElementById('open-options').addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+    window.close();
 });
 
-refreshBtn.addEventListener('click', sync);
-document.getElementById('open-all').addEventListener('click', () =>
-    openTab(`${JIRA_BASE}/issues/?jql=${encodeURIComponent(JQL)}`)
-);
-
-loadThreshold();
+document.getElementById('open-all').addEventListener('click', () => {
+    if (baseUrl) openTab(`${baseUrl}/issues/?jql=${encodeURIComponent(JQL)}`);
+});
 
 // 先畫快取內容再重抓，避免開啟 popup 時空白一拍
 paint().then(sync);

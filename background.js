@@ -1,23 +1,29 @@
-let JIRA_BASE = null;
-try {
-    importScripts('config.js');
-    JIRA_BASE = globalThis.JIRA_CONFIG?.baseUrl ?? null;
-} catch {
-    // config.js 不進版控，clone 之後尚未建立就會走到這；交給 sync 回報 config 錯誤
-}
-
 const JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY project ASC, priority DESC';
 const FIELDS = 'summary,status,priority,issuetype,project,updated,duedate';
 const POLL_ALARM = 'poll';
-const POLL_MINUTES = 2;
+const NO_PRIORITY = 99;
 
-const issueUrl = (key) => `${JIRA_BASE}/browse/${key}`;
-const filterUrl = () => `${JIRA_BASE}/issues/?jql=${encodeURIComponent(JQL)}`;
+// 傳給 storage.get 當預設值，缺鍵時會直接補上，省掉逐項判斷
+const DEFAULTS = {
+    baseUrl: null,
+    pollMinutes: 2,
+    notifyThreshold: NO_PRIORITY,
+    keepNotification: true,
+};
 
-async function fetchIssues() {
-    if (!JIRA_BASE) return { ok: false, reason: 'config' };
+const issueUrl = (base, key) => `${base}/browse/${key}`;
+const filterUrl = (base) => `${base}/issues/?jql=${encodeURIComponent(JQL)}`;
 
-    const url = new URL(`${JIRA_BASE}/rest/api/2/search`);
+const getSettings = () => chrome.storage.local.get(DEFAULTS);
+
+// 位址由使用者在設定頁輸入，權限是動態授予的，隨時可能被使用者在 Chrome 裡撤銷
+const hasPermission = (base) => chrome.permissions.contains({ origins: [`${base}/*`] });
+
+async function fetchIssues(settings) {
+    if (!settings.baseUrl) return { ok: false, reason: 'config' };
+    if (!(await hasPermission(settings.baseUrl))) return { ok: false, reason: 'permission' };
+
+    const url = new URL(`${settings.baseUrl}/rest/api/2/search`);
     url.searchParams.set('jql', JQL);
     url.searchParams.set('fields', FIELDS);
     url.searchParams.set('maxResults', '100');
@@ -51,7 +57,7 @@ async function fetchIssues() {
         projectName: i.fields.project?.name ?? '',
         priorityName: i.fields.priority?.name ?? '',
         // priority.id 是 1=Highest…5=Lowest，直接當排序權重用；沒設優先度的排最後
-        priorityRank: Number(i.fields.priority?.id ?? 99),
+        priorityRank: Number(i.fields.priority?.id ?? NO_PRIORITY),
         updated: i.fields.updated ?? '',
         duedate: i.fields.duedate ?? null,
     }));
@@ -59,42 +65,60 @@ async function fetchIssues() {
     return { ok: true, issues };
 }
 
-const NO_PRIORITY = 99;
-
-async function filterByThreshold(issues) {
-    const { notifyThreshold } = await chrome.storage.local.get('notifyThreshold');
-    const limit = Number(notifyThreshold ?? NO_PRIORITY);
-
+function filterByThreshold(issues, limit) {
     // 沒設優先度的單一律通知：欄位沒填不等於不重要，寧可多吵一次也不要被靜音吃掉
     return issues.filter((i) => i.priorityRank <= limit || i.priorityRank === NO_PRIORITY);
 }
 
-async function notifyNew(newIssues) {
+async function notifyNew(newIssues, settings) {
+    const shared = {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        requireInteraction: settings.keepNotification,
+        priority: 2,
+    };
+
     if (newIssues.length === 1) {
         const issue = newIssues[0];
-        // 通知 id 直接用單號，點擊時才知道要開哪一張。requireInteraction 的通知不會自動消失，
+        // 通知 id 直接用單號，點擊時才知道要開哪一張。停留型通知不會自動消失，
         // 而同 id 重複 create 只會靜默更新既有那則、不會再彈出，所以得先清掉
         await chrome.notifications.clear(issue.key);
         chrome.notifications.create(issue.key, {
-            type: 'basic',
-            iconUrl: 'icons/icon128.png',
+            ...shared,
             title: `${issue.key} · ${issue.priorityName || '無優先度'}`,
             message: issue.summary,
             contextMessage: `${issue.projectKey} · ${issue.type}`,
-            requireInteraction: true,
-            priority: 2,
         });
         return;
     }
 
     await chrome.notifications.clear('batch');
     chrome.notifications.create('batch', {
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
+        ...shared,
         title: `新增 ${newIssues.length} 張指派給你的單`,
         message: newIssues.map((i) => `${i.key} ${i.summary}`).join('\n'),
-        requireInteraction: true,
-        priority: 2,
+    });
+}
+
+// 測試通知刻意不套用通知門檻：使用者是明確要求它跳，被自己的設定濾掉只會被誤判成壞了
+async function sendTestNotification() {
+    const settings = await getSettings();
+    await chrome.notifications.clear('test');
+
+    return new Promise((resolve) => {
+        chrome.notifications.create(
+            'test',
+            {
+                type: 'basic',
+                iconUrl: 'icons/icon128.png',
+                title: 'Jira Notifier 測試通知',
+                message: '看得到這則通知，就表示通知管道正常。',
+                contextMessage: '這不是真的單',
+                requireInteraction: settings.keepNotification,
+                priority: 2,
+            },
+            () => resolve({ ok: !chrome.runtime.lastError, error: chrome.runtime.lastError?.message })
+        );
     });
 }
 
@@ -123,7 +147,8 @@ async function recordPoll(at, source, outcome) {
 
 // source 只影響紀錄，用來分辨這次同步是鬧鐘自動觸發還是使用者手動按的
 async function sync(source = 'manual') {
-    const result = await fetchIssues();
+    const settings = await getSettings();
+    const result = await fetchIssues(settings);
     const at = new Date().toISOString();
 
     if (!result.ok) {
@@ -141,8 +166,8 @@ async function sync(source = 'manual') {
     if (Array.isArray(seenKeys)) {
         const known = new Set(seenKeys);
         const fresh = result.issues.filter((i) => !known.has(i.key));
-        const worth = await filterByThreshold(fresh);
-        if (worth.length > 0) await notifyNew(worth);
+        const worth = filterByThreshold(fresh, Number(settings.notifyThreshold));
+        if (worth.length > 0) await notifyNew(worth, settings);
     }
 
     await chrome.storage.local.set({
@@ -155,9 +180,14 @@ async function sync(source = 'manual') {
     return result;
 }
 
+function scheduleAlarm(minutes) {
+    chrome.alarms.create(POLL_ALARM, { periodInMinutes: Number(minutes) || DEFAULTS.pollMinutes });
+}
+
 // 鬧鐘最快也要等一個週期，所以裝好／開機當下直接同步一次，不讓使用者空等
-function start() {
-    chrome.alarms.create(POLL_ALARM, { periodInMinutes: POLL_MINUTES });
+async function start() {
+    const { pollMinutes } = await getSettings();
+    scheduleAlarm(pollMinutes);
     sync('startup');
 }
 
@@ -168,14 +198,29 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === POLL_ALARM) sync('alarm');
 });
 
-chrome.notifications.onClicked.addListener((id) => {
-    chrome.tabs.create({ url: id === 'batch' ? filterUrl() : issueUrl(id) });
+// 設定頁只負責寫 storage，鬧鐘重建與立即重抓都由這裡接手
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.pollMinutes) scheduleAlarm(changes.pollMinutes.newValue);
+    if (changes.baseUrl) sync('settings');
+});
+
+chrome.notifications.onClicked.addListener(async (id) => {
+    const { baseUrl } = await getSettings();
+    if (!baseUrl) return;
+    const aggregate = id === 'batch' || id === 'test';
+    chrome.tabs.create({ url: aggregate ? filterUrl(baseUrl) : issueUrl(baseUrl, id) });
     chrome.notifications.clear(id);
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    // 非同步回覆，必須回 true 讓 channel 保持開啟
     if (msg?.type === 'sync') {
         sync().then(sendResponse);
-        return true; // 非同步回覆，必須回 true 讓 channel 保持開啟
+        return true;
+    }
+    if (msg?.type === 'testNotification') {
+        sendTestNotification().then(sendResponse);
+        return true;
     }
 });

@@ -19,9 +19,10 @@ Jira Server 8.14 以前**沒有 Personal Access Token**，能用的認證只有�
 完整步驟與疑難排解見 **[SETUP.md](SETUP.md)**。摘要：
 
 1. `git clone` 到一個**不會被移動或刪除**的位置（Chrome 直接讀取這個資料夾）
-2. 複製 `config.example.js` 為 `config.js`，填入你的 Jira 位址
-3. 把 `manifest.json` 的 `host_permissions` 改成同一個位址（該欄位必須是靜態字面值，讀不到設定檔）
-4. `chrome://extensions` → 開啟**開發人員模式** → **載入未封裝項目** → 選這個資料夾
+2. `chrome://extensions` → 開啟**開發人員模式** → **載入未封裝項目** → 選這個資料夾
+3. 點擴充功能圖示 → **開啟設定** → 填入 Jira 站台位址 → **測試並儲存**，並同意 Chrome 跳出的授權詢問
+
+**不需要編輯任何檔案。** 位址透過 `optional_host_permissions` 動態授權，因此使用者填什麼網域就授權什麼網域，不必為了改一行 `host_permissions` 去動 `manifest.json`。
 
 前置條件：同一個瀏覽器設定檔要處於 **Jira 已登入**狀態。
 
@@ -39,16 +40,16 @@ Jira Server 8.14 以前**沒有 Personal Access Token**，能用的認證只有�
 
 ## 設定
 
-改完任何一項，回到 `chrome://extensions` 按重新整理（↻）套用。
+popup 右上角的齒輪開啟設定頁，全部即時生效，不需要重新載入擴充功能。
 
-| 位置 | 常數 | 說明 |
+| 項目 | 預設 | 說明 |
 | --- | --- | --- |
-| `config.js` | `baseUrl` | Jira 站台位址。不進版控，由 `config.example.js` 複製而來 |
-| `manifest.json` | `host_permissions` | 同一個位址，結尾加 `/*`。未涵蓋的網域一律擋掉 |
-| `background.js` | `JQL` | 要追蹤的查詢條件 |
-| `background.js` | `POLL_MINUTES` | 輪詢間隔，Chrome 下限為 0.5 |
+| Jira 站台位址 | 無 | 儲存時會實際連線測試，並要求該網域的存取授權 |
+| 檢查間隔 | 2 分鐘 | 也決定了被指派後最久多久收到通知 |
+| 通知門檻 | 全部 | 只有某個優先度以上才通知。**只影響通知**，清單與徽章一律顯示全部 |
+| 通知停留在畫面上 | 開啟 | 關閉的話通知會在數秒後自動消失並收進系統通知中心 |
 
-`JQL` 預設為 `assignee = currentUser() AND resolution = Unresolved`。想連已結案的單也追蹤就拿掉 `resolution` 那段，但清單會相應變長。
+查詢條件目前仍寫死在 `background.js` 的 `JQL` 常數，預設為 `assignee = currentUser() AND resolution = Unresolved`。想連已結案的單也追蹤就拿掉 `resolution` 那段，改完需要按 ↻ 重新載入。
 
 ## 運作方式
 
@@ -72,7 +73,9 @@ alarm（每 POLL_MINUTES 分鐘）
 - **沒有設定優先度的單一律通知。** 欄位沒填不代表不重要。
 - 通知 id 直接使用單號，且**建立前會先清除同 id 的舊通知**——`requireInteraction` 的通知不會自動消失，而以相同 id 重複建立只會靜默更新既有那則、不會再次彈出。
 
-`storage.local` 中保存的鍵：`issues`、`seenKeys`、`lastSync`、`collapsed`、`notifyThreshold`、`pollLog`。全部都是非敏感資料。
+`storage.local` 中保存的鍵：設定為 `baseUrl`、`pollMinutes`、`notifyThreshold`、`keepNotification`，狀態為 `issues`、`seenKeys`、`lastSync`、`collapsed`、`pollLog`。全部都是非敏感資料。
+
+設定頁只負責寫入 `storage`，鬧鐘重建與變更後的立即重抓由 background 的 `storage.onChanged` 接手——這樣設定頁不必知道 service worker 醒著沒有。
 
 ## 疑難排解
 
@@ -80,7 +83,9 @@ alarm（每 POLL_MINUTES 分鐘）
 
 **徽章顯示 `!`** — Jira session 過期。開啟 Jira 登入，下次輪詢自動恢復，不需重新安裝。
 
-**通知沒跳出來** — 先確認是「沒建立」還是「建立了但沒顯示」：
+**通知沒跳出來** — 先到設定頁按**送出測試通知**。跳得出來代表通知管道正常，問題在偵測邏輯而非作業系統；跳不出來就是被 Windows 擋了，往下看。
+
+要進一步分辨是「沒建立」還是「建立了但沒顯示」：
 
 ```js
 chrome.notifications.getAll().then(n => console.log(Object.keys(n)))
@@ -120,10 +125,9 @@ chrome.storage.local.set({ seenKeys: [] }).then(() => sync('test'));
 | 檔案 | 內容 |
 | --- | --- |
 | `manifest.json` | 權限與進入點宣告 |
-| `config.example.js` | 設定範本，複製為 `config.js` 後填入位址 |
-| `config.js` | 各自環境的 Jira 位址，**不進版控** |
 | `background.js` | service worker：輪詢、差異比對、通知、徽章 |
-| `popup.html` / `popup.js` | 清單 UI 與通知門檻設定 |
+| `popup.html` / `popup.js` | 待辦清單 UI |
+| `options.html` / `options.js` | 設定頁：位址授權、輪詢、通知 |
 | `icons/` | 16 / 32 / 48 / 128 四種尺寸 |
 | `SETUP.md` | 安裝與設定教學 |
 

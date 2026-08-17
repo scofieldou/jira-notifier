@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant">
+    <head>
+        <meta charset="utf-8" />
+        <title>Jira Notifier 設定</title>
+        <style>
+            :root {
+                --text: #172b4d;
+                --subtle: #6b778c;
+                --border: #dfe1e6;
+                --blue: #0c66e4;
+                --ok: #216e4e;
+                --bad: #ae2e24;
+                --warn: #a54800;
+            }
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                margin: 0;
+                padding: 32px 20px 60px;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 14px;
+                line-height: 1.5;
+                color: var(--text);
+                background: #f7f8f9;
+            }
+            .wrap {
+                max-width: 620px;
+                margin: 0 auto;
+            }
+            h1 {
+                font-size: 20px;
+                margin: 0 0 24px;
+            }
+            section {
+                background: #fff;
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 18px 20px;
+                margin-bottom: 16px;
+            }
+            h2 {
+                font-size: 14px;
+                margin: 0 0 4px;
+            }
+            .section-hint {
+                margin: 0 0 16px;
+                font-size: 12px;
+                color: var(--subtle);
+            }
+            .field {
+                margin-bottom: 16px;
+            }
+            .field:last-child {
+                margin-bottom: 0;
+            }
+            label {
+                display: block;
+                font-size: 12px;
+                font-weight: 600;
+                margin-bottom: 5px;
+            }
+            .hint {
+                font-size: 12px;
+                color: var(--subtle);
+                margin-top: 5px;
+            }
+            input[type='text'],
+            select {
+                width: 100%;
+                font-family: inherit;
+                font-size: 13px;
+                color: var(--text);
+                padding: 7px 9px;
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                background: #fff;
+            }
+            input[type='text']:focus,
+            select:focus {
+                outline: 2px solid var(--blue);
+                outline-offset: -1px;
+                border-color: var(--blue);
+            }
+            .row {
+                display: flex;
+                gap: 8px;
+            }
+            .row input {
+                flex: 1;
+            }
+            button {
+                border: 0;
+                border-radius: 4px;
+                background: var(--blue);
+                color: #fff;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-family: inherit;
+                cursor: pointer;
+                white-space: nowrap;
+            }
+            button:hover:not(:disabled) {
+                background: #0055cc;
+            }
+            button:disabled {
+                background: #8fb8f6;
+                cursor: default;
+            }
+            button.ghost {
+                background: #fff;
+                color: var(--text);
+                border: 1px solid var(--border);
+            }
+            button.ghost:hover:not(:disabled) {
+                background: #f4f5f7;
+            }
+            .result {
+                margin-top: 12px;
+                font-size: 13px;
+                padding: 9px 12px;
+                border-radius: 4px;
+                display: none;
+            }
+            .result.show {
+                display: block;
+            }
+            .result.ok {
+                background: #dcfff1;
+                color: var(--ok);
+            }
+            .result.bad {
+                background: #ffecea;
+                color: var(--bad);
+            }
+            .result.warn {
+                background: #fff7d6;
+                color: var(--warn);
+            }
+            .check {
+                display: flex;
+                gap: 9px;
+                align-items: flex-start;
+            }
+            .check input {
+                margin: 3px 0 0;
+                flex: none;
+            }
+            .check label {
+                font-weight: 400;
+                font-size: 13px;
+                margin: 0;
+            }
+            .saved {
+                font-size: 12px;
+                color: var(--ok);
+                margin-left: 8px;
+                opacity: 0;
+                transition: opacity 0.2s;
+            }
+            .saved.show {
+                opacity: 1;
+            }
+            footer {
+                text-align: center;
+                font-size: 12px;
+                color: var(--subtle);
+                margin-top: 24px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <h1>Jira Notifier 設定</h1>
+
+            <section>
+                <h2>Jira 連線</h2>
+                <p class="section-hint">
+                    輸入你的 Jira 站台位址。儲存時 Chrome 會詢問是否允許存取該網域，必須同意才能運作。
+                </p>
+                <div class="field">
+                    <label for="base-url">站台位址</label>
+                    <div class="row">
+                        <input
+                            type="text"
+                            id="base-url"
+                            placeholder="http://jira.mycompany.com:8080"
+                            spellcheck="false"
+                            autocomplete="off"
+                        />
+                        <button id="save-url">測試並儲存</button>
+                    </div>
+                    <div class="hint">
+                        從登入 Jira 後的網址列複製，取到連接埠為止，不含後面的路徑。Jira Cloud（atlassian.net）不支援。
+                    </div>
+                    <div class="result" id="url-result"></div>
+                </div>
+            </section>
+
+            <section>
+                <h2>輪詢<span class="saved" id="saved-poll">已儲存</span></h2>
+                <p class="section-hint">
+                    背景每隔多久檢查一次。這也決定了被指派後最久多久會收到通知。
+                </p>
+                <div class="field">
+                    <label for="poll-minutes">檢查間隔</label>
+                    <select id="poll-minutes">
+                        <option value="1">1 分鐘</option>
+                        <option value="2">2 分鐘</option>
+                        <option value="5">5 分鐘</option>
+                        <option value="10">10 分鐘</option>
+                    </select>
+                    <div class="hint">縮短間隔不會讓你更早知道什麼重要的事，只會讓 Jira 多收請求。</div>
+                </div>
+            </section>
+
+            <section>
+                <h2>通知<span class="saved" id="saved-notify">已儲存</span></h2>
+                <p class="section-hint">只影響通知，清單與徽章一律顯示全部的單。</p>
+                <div class="field">
+                    <label for="threshold">通知門檻</label>
+                    <select id="threshold">
+                        <option value="99">全部</option>
+                        <option value="4">Low 以上</option>
+                        <option value="3">Medium 以上</option>
+                        <option value="2">High 以上</option>
+                        <option value="1">僅 Highest</option>
+                    </select>
+                    <div class="hint">沒有設定優先度的單一律通知——欄位沒填不代表不重要。</div>
+                </div>
+                <div class="field check">
+                    <input type="checkbox" id="keep-notification" />
+                    <label for="keep-notification">
+                        通知停留在畫面上直到我點掉
+                        <div class="hint">取消勾選的話，通知會在數秒後自動消失並收進重要訊息中心。</div>
+                    </label>
+                </div>
+                <div class="field">
+                    <button id="test-notify" class="ghost">送出測試通知</button>
+                    <div class="hint">
+                        會立刻跳一則假通知，用來確認作業系統這端沒有把通知擋掉。測試通知不受上面的門檻限制，一定會跳。
+                    </div>
+                    <div class="result" id="notify-result"></div>
+                </div>
+            </section>
+
+            <footer>設定即時生效，不需要重新載入擴充功能。</footer>
+        </div>
+        <script src="options.js"></script>
+    </body>
+</html>
