@@ -1,8 +1,12 @@
+const DEFAULT_JQL =
+    'assignee = currentUser() AND resolution = Unresolved ORDER BY project ASC, priority DESC';
+
 const DEFAULTS = {
     baseUrl: null,
     pollMinutes: 2,
     notifyThreshold: 99,
     keepNotification: true,
+    jql: DEFAULT_JQL,
 };
 
 const urlInput = document.getElementById('base-url');
@@ -13,6 +17,10 @@ const thresholdSelect = document.getElementById('threshold');
 const keepCheckbox = document.getElementById('keep-notification');
 const testNotifyBtn = document.getElementById('test-notify');
 const notifyResult = document.getElementById('notify-result');
+const jqlInput = document.getElementById('jql');
+const saveJqlBtn = document.getElementById('save-jql');
+const resetJqlBtn = document.getElementById('reset-jql');
+const jqlResult = document.getElementById('jql-result');
 
 function showIn(el, kind, text) {
     el.className = `result show ${kind}`;
@@ -136,12 +144,75 @@ keepCheckbox.addEventListener('change', async () => {
     flash('saved-notify');
 });
 
+async function validateJql(baseUrl, jql) {
+    // maxResults=0 只要總數不要內容，驗證用不著把單撈回來
+    const url = new URL(`${baseUrl}/rest/api/2/search`);
+    url.searchParams.set('jql', jql);
+    url.searchParams.set('maxResults', '0');
+
+    let res;
+    try {
+        res = await fetch(url, { credentials: 'include' });
+    } catch (err) {
+        return { save: false, kind: 'bad', text: `連不上 Jira：${err}` };
+    }
+
+    if (res.status === 401 || res.status === 403) {
+        return { save: false, kind: 'warn', text: '尚未登入 Jira，無法驗證。請先登入後再試。' };
+    }
+
+    let data;
+    try {
+        data = await res.json();
+    } catch {
+        return { save: false, kind: 'bad', text: `Jira 回應無法解析（HTTP ${res.status}）。` };
+    }
+
+    if (!res.ok) {
+        // Jira 對語法錯誤回 400，錯誤描述在 errorMessages 裡，直接原樣轉給使用者最有用
+        const detail = data.errorMessages?.join('　') || `HTTP ${res.status}`;
+        return { save: false, kind: 'bad', text: detail };
+    }
+
+    return { save: true, kind: 'ok', text: `語法正確，目前符合 ${data.total} 張單。` };
+}
+
+saveJqlBtn.addEventListener('click', async () => {
+    const jql = jqlInput.value.trim();
+    if (!jql) {
+        showIn(jqlResult, 'bad', '查詢條件不能空白。要回到預設請按「還原預設」。');
+        return;
+    }
+
+    const { baseUrl } = await chrome.storage.local.get({ baseUrl: null });
+    if (!baseUrl) {
+        showIn(jqlResult, 'bad', '請先在上面設定 Jira 站台位址。');
+        return;
+    }
+
+    saveJqlBtn.disabled = true;
+    showIn(jqlResult, 'warn', '驗證中…');
+
+    const outcome = await validateJql(baseUrl, jql);
+    if (outcome.save) await chrome.storage.local.set({ jql });
+    showIn(jqlResult, outcome.kind, outcome.text);
+    saveJqlBtn.disabled = false;
+});
+
+// 預設值是已知可用的，不必再驗一次；這是填壞之後的退路，要能無條件生效
+resetJqlBtn.addEventListener('click', async () => {
+    jqlInput.value = DEFAULT_JQL;
+    await chrome.storage.local.set({ jql: DEFAULT_JQL });
+    showIn(jqlResult, 'ok', '已還原為預設條件。');
+});
+
 async function load() {
     const settings = await chrome.storage.local.get(DEFAULTS);
     urlInput.value = settings.baseUrl ?? '';
     pollSelect.value = String(settings.pollMinutes);
     thresholdSelect.value = String(settings.notifyThreshold);
     keepCheckbox.checked = settings.keepNotification;
+    jqlInput.value = settings.jql;
 
     if (!settings.baseUrl) {
         showResult('warn', '尚未設定 Jira 位址，擴充功能目前不會運作。');

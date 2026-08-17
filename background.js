@@ -1,4 +1,5 @@
-const JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY project ASC, priority DESC';
+const DEFAULT_JQL =
+    'assignee = currentUser() AND resolution = Unresolved ORDER BY project ASC, priority DESC';
 const FIELDS = 'summary,status,priority,issuetype,project,updated,duedate';
 const POLL_ALARM = 'poll';
 const NO_PRIORITY = 99;
@@ -9,10 +10,11 @@ const DEFAULTS = {
     pollMinutes: 2,
     notifyThreshold: NO_PRIORITY,
     keepNotification: true,
+    jql: DEFAULT_JQL,
 };
 
 const issueUrl = (base, key) => `${base}/browse/${key}`;
-const filterUrl = (base) => `${base}/issues/?jql=${encodeURIComponent(JQL)}`;
+const filterUrl = (base, jql) => `${base}/issues/?jql=${encodeURIComponent(jql)}`;
 
 const getSettings = () => chrome.storage.local.get(DEFAULTS);
 
@@ -24,7 +26,7 @@ async function fetchIssues(settings) {
     if (!(await hasPermission(settings.baseUrl))) return { ok: false, reason: 'permission' };
 
     const url = new URL(`${settings.baseUrl}/rest/api/2/search`);
-    url.searchParams.set('jql', JQL);
+    url.searchParams.set('jql', settings.jql || DEFAULT_JQL);
     url.searchParams.set('fields', FIELDS);
     url.searchParams.set('maxResults', '100');
 
@@ -199,17 +201,21 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 // 設定頁只負責寫 storage，鬧鐘重建與立即重抓都由這裡接手
-chrome.storage.onChanged.addListener((changes, area) => {
+chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local') return;
     if (changes.pollMinutes) scheduleAlarm(changes.pollMinutes.newValue);
-    if (changes.baseUrl) sync('settings');
+
+    // 換了查詢條件等於換了一份清單，沿用舊基準會把新條件多撈到的單全部當成新指派通知一輪
+    if (changes.jql) await chrome.storage.local.remove('seenKeys');
+
+    if (changes.baseUrl || changes.jql) sync('settings');
 });
 
 chrome.notifications.onClicked.addListener(async (id) => {
-    const { baseUrl } = await getSettings();
+    const { baseUrl, jql } = await getSettings();
     if (!baseUrl) return;
     const aggregate = id === 'batch' || id === 'test';
-    chrome.tabs.create({ url: aggregate ? filterUrl(baseUrl) : issueUrl(baseUrl, id) });
+    chrome.tabs.create({ url: aggregate ? filterUrl(baseUrl, jql) : issueUrl(baseUrl, id) });
     chrome.notifications.clear(id);
 });
 

@@ -1,4 +1,5 @@
-const JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY project ASC, priority DESC';
+const DEFAULT_JQL =
+    'assignee = currentUser() AND resolution = Unresolved ORDER BY project ASC, priority DESC';
 
 const PRIORITY_COLOR = {
     1: '#c9372c',
@@ -16,6 +17,7 @@ const refreshBtn = document.getElementById('refresh');
 let collapsed = new Set();
 // 位址存在設定裡，讀出來前所有連往 Jira 的連結都不成立
 let baseUrl = null;
+let jql = DEFAULT_JQL;
 
 function openTab(url) {
     chrome.tabs.create({ url });
@@ -115,7 +117,8 @@ function render(issues, lastSync) {
     }
 
     if (!issues || issues.length === 0) {
-        list.replaceChildren(el('div', 'empty', '目前沒有指派給你的未結案單 🎉'));
+        // 查詢條件可自訂，所以這裡不能寫死「沒有指派給你的單」
+        list.replaceChildren(el('div', 'empty', '目前沒有符合查詢條件的單 🎉'));
         return;
     }
 
@@ -168,10 +171,17 @@ function renderSyncState(lastSync) {
 }
 
 async function paint() {
-    const stored = await chrome.storage.local.get(['issues', 'lastSync', 'collapsed', 'baseUrl']);
+    const stored = await chrome.storage.local.get([
+        'issues',
+        'lastSync',
+        'collapsed',
+        'baseUrl',
+        'jql',
+    ]);
     const { issues, lastSync } = stored;
     collapsed = new Set(Array.isArray(stored.collapsed) ? stored.collapsed : []);
     baseUrl = stored.baseUrl ?? null;
+    jql = stored.jql || DEFAULT_JQL;
     render(issues, lastSync);
     renderSyncState(lastSync);
 }
@@ -192,7 +202,7 @@ document.getElementById('open-options').addEventListener('click', () => {
 });
 
 document.getElementById('open-all').addEventListener('click', () => {
-    if (baseUrl) openTab(`${baseUrl}/issues/?jql=${encodeURIComponent(JQL)}`);
+    if (baseUrl) openTab(`${baseUrl}/issues/?jql=${encodeURIComponent(jql)}`);
 });
 
 // 先畫快取內容再重抓，避免開啟 popup 時空白一拍
