@@ -51,6 +51,12 @@ Jira Server 8.14 以前**沒有 Personal Access Token**，能用的認證只有�
 
 **通知門檻** — popup 底部可設定只有某個優先度以上才跳通知。門檻只影響通知，清單與徽章仍顯示全部。
 
+**更新提示** — 每天檢查一次本 repo 的 `manifest.json`，版號較新時在 popup 顯示藍色橫幅。按 ✕ 之後該版本不再提示，直到出現更版本為止。
+
+刻意只用橫幅、不發桌面通知——那條管道要留給 Jira 指派，混入工具自身的更新會稀釋它的意義。也刻意比對版號而非 commit sha：改個 README 也會變 sha，會一直提示與功能無關的更新。
+
+⚠️ **發版時必須同步提高 `manifest.json` 的 `version`**，否則使用者端不會收到提示，而且沒有任何錯誤徵兆。fork 本專案的話，`background.js` 的 `UPDATE_MANIFEST_URL` 與 `popup.js` 的 `REPO_URL` 要改成你自己的 repo。
+
 ## 設定
 
 popup 右上角的齒輪開啟設定頁，全部即時生效，不需要重新載入擴充功能。

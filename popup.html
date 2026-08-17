@@ -75,6 +75,30 @@
             .bar button:hover {
                 background: #f3f0ff;
             }
+            .bar button.plain {
+                border: 0;
+                background: transparent;
+                padding: 2px 4px;
+            }
+            .bar.update {
+                flex-wrap: wrap;
+                background: #e9f2ff;
+                color: #0055cc;
+                border-bottom-color: #cce0ff;
+            }
+            .bar.update button {
+                border-color: #99c1f1;
+                color: #0055cc;
+            }
+            .bar.update button:hover {
+                background: #e9f2ff;
+            }
+            .bar-sub {
+                flex: 0 0 100%;
+                font-size: 11px;
+                opacity: 0.8;
+                margin-top: 3px;
+            }
             .missed {
                 border-bottom: 3px solid #ddd6fe;
             }
@@ -243,6 +267,9 @@
             }
             footer {
                 flex: none;
+                display: flex;
+                align-items: baseline;
+                gap: 8px;
                 padding: 8px 12px;
                 border-top: 1px solid var(--border);
             }
@@ -261,6 +288,7 @@
                 color: var(--text);
             }
             footer a {
+                flex: 1;
                 font-size: 11px;
                 color: #0c66e4;
                 text-decoration: none;
@@ -268,6 +296,10 @@
             }
             footer a:hover {
                 text-decoration: underline;
+            }
+            #version {
+                font-size: 11px;
+                color: var(--subtle);
             }
         </style>
     </head>
@@ -283,8 +315,17 @@
             <span id="mute-text"></span>
             <button id="unmute">解除靜音</button>
         </div>
+        <div id="update-bar" class="bar update hidden">
+            <span id="update-text"></span>
+            <button id="update-view">查看</button>
+            <button id="update-dismiss" class="plain" title="不再提示這一版">✕</button>
+            <span class="bar-sub">更新後要到 chrome://extensions 按 ↻ 才會生效</span>
+        </div>
         <main id="list"></main>
-        <footer><a id="open-all">在 Jira 開啟完整清單 →</a></footer>
+        <footer>
+            <a id="open-all">在 Jira 開啟完整清單 →</a>
+            <span id="version"></span>
+        </footer>
         <script src="popup.js"></script>
     </body>
 </html>

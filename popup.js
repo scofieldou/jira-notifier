@@ -19,6 +19,9 @@ let collapsed = new Set();
 let baseUrl = null;
 let jql = DEFAULT_JQL;
 let mutedSince = null;
+let updateAvailable = null;
+
+const REPO_URL = 'https://github.com/scofieldou/jira-notifier';
 
 function openTab(url) {
     chrome.tabs.create({ url });
@@ -236,6 +239,19 @@ function renderMuteState(since) {
     }
 }
 
+// 使用者按過 ✕ 的版本不再提示，直到出現更新的版本為止
+function renderUpdateBar(available, dismissed) {
+    const bar = document.getElementById('update-bar');
+    const show = Boolean(available) && available !== dismissed;
+
+    bar.classList.toggle('hidden', !show);
+    if (show) {
+        const current = chrome.runtime.getManifest().version;
+        document.getElementById('update-text').textContent =
+            `有新版 ${available}（目前 ${current}）`;
+    }
+}
+
 async function paint() {
     const stored = await chrome.storage.local.get([
         'issues',
@@ -245,15 +261,19 @@ async function paint() {
         'jql',
         'mutedSince',
         'missedReport',
+        'updateAvailable',
+        'updateDismissed',
     ]);
     const { issues, lastSync } = stored;
     collapsed = new Set(Array.isArray(stored.collapsed) ? stored.collapsed : []);
     baseUrl = stored.baseUrl ?? null;
     jql = stored.jql || DEFAULT_JQL;
     mutedSince = stored.mutedSince ?? null;
+    updateAvailable = stored.updateAvailable ?? null;
     render(issues, lastSync, stored.missedReport);
     renderSyncState(lastSync);
     renderMuteState(mutedSince);
+    renderUpdateBar(updateAvailable, stored.updateDismissed ?? null);
 }
 
 async function sync() {
@@ -274,6 +294,12 @@ async function setMuted(muted) {
 document.getElementById('toggle-mute').addEventListener('click', () => setMuted(!mutedSince));
 document.getElementById('unmute').addEventListener('click', () => setMuted(false));
 
+document.getElementById('update-view').addEventListener('click', () => openTab(REPO_URL));
+document.getElementById('update-dismiss').addEventListener('click', async () => {
+    await chrome.storage.local.set({ updateDismissed: updateAvailable });
+    await paint();
+});
+
 document.getElementById('open-options').addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
     window.close();
@@ -282,6 +308,8 @@ document.getElementById('open-options').addEventListener('click', () => {
 document.getElementById('open-all').addEventListener('click', () => {
     if (baseUrl) openTab(`${baseUrl}/issues/?jql=${encodeURIComponent(jql)}`);
 });
+
+document.getElementById('version').textContent = `v${chrome.runtime.getManifest().version}`;
 
 // 先畫快取內容再重抓，避免開啟 popup 時空白一拍
 paint().then(sync);

@@ -15,6 +15,11 @@ const DEFAULTS = {
     mutedSince: null,
 };
 
+// 比對 manifest 版號而非 commit sha：改個 README 也會變 sha，會一直提示與功能無關的更新
+const UPDATE_MANIFEST_URL =
+    'https://raw.githubusercontent.com/scofieldou/jira-notifier/main/manifest.json';
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 const BADGE_COLOR = {
     ok: '#0c66e4',
     auth: '#ae2e24',
@@ -238,6 +243,36 @@ async function refreshBadge() {
     });
 }
 
+function isNewer(remote, local) {
+    const a = String(remote).split('.').map(Number);
+    const b = String(local).split('.').map(Number);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        const diff = (a[i] || 0) - (b[i] || 0);
+        if (diff !== 0) return diff > 0;
+    }
+    return false;
+}
+
+async function checkUpdate() {
+    const { updateCheckedAt } = await chrome.storage.local.get({ updateCheckedAt: 0 });
+    if (Date.now() - updateCheckedAt < UPDATE_CHECK_INTERVAL_MS) return;
+
+    // 不管成功與否都先記時間戳，離線時才不會每次輪詢都重打 GitHub
+    await chrome.storage.local.set({ updateCheckedAt: Date.now() });
+
+    try {
+        const res = await fetch(UPDATE_MANIFEST_URL, { cache: 'no-store' });
+        if (!res.ok) return;
+        const remote = await res.json();
+        const current = chrome.runtime.getManifest().version;
+        await chrome.storage.local.set({
+            updateAvailable: isNewer(remote.version, current) ? remote.version : null,
+        });
+    } catch {
+        // 檢查更新失敗不該影響本體功能，靜靜略過，明天再試
+    }
+}
+
 // 保留最近幾次輪詢的軌跡，用來確認 Chrome 關窗期間鬧鐘是否仍在喚醒 service worker
 async function recordPoll(at, source, outcome) {
     const { pollLog } = await chrome.storage.local.get('pollLog');
@@ -248,6 +283,9 @@ async function recordPoll(at, source, outcome) {
 
 // source 只影響紀錄，用來分辨這次同步是鬧鐘自動觸發還是使用者手動按的
 async function sync(source = 'manual') {
+    // 與 Jira 無關，所以放在最前面，撈不到單也不影響更新檢查
+    await checkUpdate();
+
     const settings = await getSettings();
     const result = await fetchIssues(settings);
     const at = new Date().toISOString();
