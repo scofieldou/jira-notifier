@@ -41,21 +41,75 @@
                 font-size: 11px;
                 color: var(--subtle);
             }
-            #refresh {
-                border: 1px solid var(--border);
-                background: #fff;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
-                cursor: pointer;
-                color: var(--text);
-            }
-            #refresh:hover:not(:disabled) {
-                background: var(--hover);
-            }
-            #refresh:disabled {
-                color: var(--subtle);
+            .icon-btn:disabled {
+                color: #b3bac5;
                 cursor: default;
+            }
+            .bar {
+                flex: none;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 7px 12px;
+                font-size: 12px;
+                background: #f3f0ff;
+                color: #5e4db2;
+                border-bottom: 1px solid #ddd6fe;
+            }
+            .bar.hidden {
+                display: none;
+            }
+            .bar span {
+                flex: 1;
+            }
+            .bar button {
+                border: 1px solid #c7bfff;
+                background: #fff;
+                color: #5e4db2;
+                border-radius: 4px;
+                padding: 3px 9px;
+                font-size: 11px;
+                font-family: inherit;
+                cursor: pointer;
+            }
+            .bar button:hover {
+                background: #f3f0ff;
+            }
+            .missed {
+                border-bottom: 3px solid #ddd6fe;
+            }
+            .missed-head {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 7px 12px 5px;
+                background: #f3f0ff;
+                font-size: 11px;
+                font-weight: 600;
+                color: #5e4db2;
+            }
+            .missed-head span {
+                flex: 1;
+            }
+            .missed-head button {
+                border: 0;
+                background: transparent;
+                color: #5e4db2;
+                font-size: 12px;
+                cursor: pointer;
+                padding: 0 3px;
+            }
+            .missed-note {
+                padding: 5px 12px 7px;
+                font-size: 11px;
+                color: var(--subtle);
+                background: #faf9ff;
+            }
+            .issue.synthetic {
+                cursor: default;
+            }
+            .issue.synthetic:hover {
+                background: transparent;
             }
             main {
                 overflow-y: auto;
@@ -221,9 +275,14 @@
         <header>
             <h1>指派給我的單</h1>
             <span id="sync-state"></span>
-            <button id="refresh">重新整理</button>
+            <button id="refresh" class="icon-btn" title="重新整理">↻</button>
+            <button id="toggle-mute" class="icon-btn" title="靜音">🔔</button>
             <button id="open-options" class="icon-btn" title="設定">⚙</button>
         </header>
+        <div id="mute-bar" class="bar hidden">
+            <span id="mute-text"></span>
+            <button id="unmute">解除靜音</button>
+        </div>
         <main id="list"></main>
         <footer><a id="open-all">在 Jira 開啟完整清單 →</a></footer>
         <script src="popup.js"></script>

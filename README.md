@@ -34,7 +34,20 @@ Jira Server 8.14 以前**沒有 Personal Access Token**，能用的認證只有�
 
 **清單** — 點工具列圖示開啟。依專案分組，組內依優先度由高到低排列。點專案標題可收合該組，收合狀態會保留。點任一列開啟該單。
 
-**徽章** — 圖示上的數字是目前未結案的單量。紅色 `!` 表示 Jira 登入已過期，藍色數字以外的狀況見下方疑難排解。
+**徽章** — 圖示上的數字是目前符合查詢條件的單量，底色表示狀態：
+
+| 底色 | 意思 |
+| --- | --- |
+| 藍色 | 正常 |
+| 紫色 | 靜音中 |
+| 紅色 `!` | Jira 未登入或 session 過期 |
+| 橘色 `?` | 位址錯誤、權限被撤銷或連不上 |
+
+靜音用紫色而非灰色，是因為灰色讀起來像「功能未啟動」，而這裡要表達的是刻意靜音。
+
+**靜音** — popup 標題列的 🔕。靜音後**只擋通知**，輪詢、清單、徽章數字一律照常。沒有時限，只能手動解除——開會多久往往事先不知道，設了時限反而要再設一次。
+
+解除時會把靜音期間累積的通知結算成一份報告：跳一則彙總通知（內文直接列單號），同時在 popup 清單頂端顯示完整列表，看過按 ✕ 消掉。期間被指派、但解除前又轉走的單不會列出，只在末尾記一筆數量——列出來反而讓人困惑。
 
 **通知門檻** — popup 底部可設定只有某個優先度以上才跳通知。門檻只影響通知，清單與徽章仍顯示全部。
 
@@ -76,7 +89,9 @@ alarm（每 POLL_MINUTES 分鐘）
 - **沒有設定優先度的單一律通知。** 欄位沒填不代表不重要。
 - 通知 id 直接使用單號，且**建立前會先清除同 id 的舊通知**——`requireInteraction` 的通知不會自動消失，而以相同 id 重複建立只會靜默更新既有那則、不會再次彈出。
 
-`storage.local` 中保存的鍵：設定為 `baseUrl`、`pollMinutes`、`notifyThreshold`、`keepNotification`，狀態為 `issues`、`seenKeys`、`lastSync`、`collapsed`、`pollLog`。全部都是非敏感資料。
+靜音期間該通知的單會進 `mutedQueue` 而不是被丟棄，`seenKeys` 照常更新。反過來做（靜音時不更新 `seenKeys`，解除時讓它們自然爆出來）看似省事，但期間被指派又轉走的單會被錯報成新指派——它已經不在你手上了。
+
+`storage.local` 中保存的鍵：設定為 `baseUrl`、`pollMinutes`、`notifyThreshold`、`keepNotification`、`jql`、`mutedSince`，狀態為 `issues`、`seenKeys`、`lastSync`、`collapsed`、`pollLog`、`mutedQueue`、`missedReport`。全部都是非敏感資料。
 
 設定頁只負責寫入 `storage`，鬧鐘重建與變更後的立即重抓由 background 的 `storage.onChanged` 接手——這樣設定頁不必知道 service worker 醒著沒有。
 

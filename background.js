@@ -11,6 +11,16 @@ const DEFAULTS = {
     notifyThreshold: NO_PRIORITY,
     keepNotification: true,
     jql: DEFAULT_JQL,
+    // 靜音只能手動解除，存開始時間是為了讓 popup 顯示已靜音多久
+    mutedSince: null,
+};
+
+const BADGE_COLOR = {
+    ok: '#0c66e4',
+    auth: '#ae2e24',
+    error: '#a54800',
+    // 紫色而非灰色：灰色讀起來像功能未啟動，這裡要表達的是刻意靜音
+    muted: '#6554c0',
 };
 
 const issueUrl = (base, key) => `${base}/browse/${key}`;
@@ -102,9 +112,89 @@ async function notifyNew(newIssues, settings) {
     });
 }
 
-// 測試通知刻意不套用通知門檻：使用者是明確要求它跳，被自己的設定濾掉只會被誤判成壞了
+async function queueMuted(entries) {
+    const { mutedQueue } = await chrome.storage.local.get({ mutedQueue: [] });
+    await chrome.storage.local.set({ mutedQueue: [...mutedQueue, ...entries].slice(-100) });
+}
+
+const toQueueEntry = (issue) => ({
+    key: issue.key,
+    summary: issue.summary,
+    projectKey: issue.projectKey,
+    priorityName: issue.priorityName,
+    at: Date.now(),
+});
+
+async function notifyMissed(items, dropped, settings) {
+    const keys = items.map((i) => i.key);
+    const head = keys.slice(0, 5).join('、');
+    const rest = keys.length > 5 ? ` 及其他 ${keys.length - 5} 張` : '';
+    const note = dropped > 0 ? `\n另有 ${dropped} 張已不在你名下` : '';
+
+    await chrome.notifications.clear('missed');
+    chrome.notifications.create('missed', {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: `靜音期間有 ${items.length} 則通知`,
+        message: `${head}${rest}${note}`.trim() || '都已不在你名下',
+        requireInteraction: settings.keepNotification,
+        priority: 2,
+    });
+}
+
+// 解除靜音時把累積的通知結算成一份報告，popup 用它畫「錯過的」區塊
+async function flushMuted(settings) {
+    const { mutedQueue, issues, mutedSince } = await chrome.storage.local.get({
+        mutedQueue: [],
+        issues: [],
+        mutedSince: null,
+    });
+
+    if (mutedQueue.length === 0) return;
+
+    const currentKeys = new Set(issues.map((i) => i.key));
+    // 合成項目（測試通知）不對應真實單號，不能拿現有清單去篩掉它
+    const items = mutedQueue.filter((e) => e.synthetic || currentKeys.has(e.key));
+    const dropped = mutedQueue.length - items.length;
+
+    await chrome.storage.local.set({
+        missedReport: { items, dropped, from: mutedSince, to: Date.now() },
+        mutedQueue: [],
+    });
+    await notifyMissed(items, dropped, settings);
+}
+
+async function setMuted(muted) {
+    const settings = await getSettings();
+    if (muted) {
+        await chrome.storage.local.set({ mutedSince: Date.now(), mutedQueue: [] });
+    } else {
+        await flushMuted(settings);
+        await chrome.storage.local.set({ mutedSince: null });
+    }
+    await refreshBadge();
+    return { ok: true };
+}
+
+// 測試通知刻意不套用通知門檻：使用者是明確要求它跳，被自己的設定濾掉只會被誤判成壞了。
+// 但靜音要照擋——擋下來的那則會出現在解除後的清單裡，順帶驗證靜音佇列本身能不能用
 async function sendTestNotification() {
     const settings = await getSettings();
+
+    if (settings.mutedSince) {
+        await queueMuted([
+            {
+                key: '測試',
+                summary: '這是從設定頁送出的測試通知',
+                projectKey: '',
+                priorityName: '',
+                synthetic: true,
+                at: Date.now(),
+            },
+        ]);
+        return { ok: true, muted: true };
+    }
+
     await chrome.notifications.clear('test');
 
     return new Promise((resolve) => {
@@ -124,19 +214,28 @@ async function sendTestNotification() {
     });
 }
 
-async function setBadge(state, count) {
-    if (state === 'auth') {
-        await chrome.action.setBadgeText({ text: '!' });
-        await chrome.action.setBadgeBackgroundColor({ color: '#ae2e24' });
+// 徽章完全由 storage 推導，這樣切換靜音時不必自己算數量也能立刻更新
+async function refreshBadge() {
+    const { lastSync, mutedSince } = await chrome.storage.local.get({
+        lastSync: null,
+        mutedSince: null,
+    });
+
+    if (lastSync && !lastSync.ok) {
+        const auth = lastSync.reason === 'auth';
+        await chrome.action.setBadgeText({ text: auth ? '!' : '?' });
+        await chrome.action.setBadgeBackgroundColor({
+            color: auth ? BADGE_COLOR.auth : BADGE_COLOR.error,
+        });
         return;
     }
-    if (state === 'error') {
-        await chrome.action.setBadgeText({ text: '?' });
-        await chrome.action.setBadgeBackgroundColor({ color: '#a54800' });
-        return;
-    }
-    await chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
-    await chrome.action.setBadgeBackgroundColor({ color: '#0c66e4' });
+
+    const count = lastSync?.count ?? 0;
+    // 靜音時即使 0 張也要顯示徽章，否則看不出自己還靜著
+    await chrome.action.setBadgeText({ text: count > 0 || mutedSince ? String(count) : '' });
+    await chrome.action.setBadgeBackgroundColor({
+        color: mutedSince ? BADGE_COLOR.muted : BADGE_COLOR.ok,
+    });
 }
 
 // 保留最近幾次輪詢的軌跡，用來確認 Chrome 關窗期間鬧鐘是否仍在喚醒 service worker
@@ -154,9 +253,9 @@ async function sync(source = 'manual') {
     const at = new Date().toISOString();
 
     if (!result.ok) {
-        await setBadge(result.reason === 'auth' ? 'auth' : 'error');
         // 撈失敗時不動 seenKeys，否則恢復連線後會把整份清單當成新單全部通知一次
         await chrome.storage.local.set({ lastSync: { at, ok: false, ...result } });
+        await refreshBadge();
         await recordPoll(at, source, `✗ ${result.reason}`);
         return result;
     }
@@ -169,7 +268,10 @@ async function sync(source = 'manual') {
         const known = new Set(seenKeys);
         const fresh = result.issues.filter((i) => !known.has(i.key));
         const worth = filterByThreshold(fresh, Number(settings.notifyThreshold));
-        if (worth.length > 0) await notifyNew(worth, settings);
+        if (worth.length > 0) {
+            if (settings.mutedSince) await queueMuted(worth.map(toQueueEntry));
+            else await notifyNew(worth, settings);
+        }
     }
 
     await chrome.storage.local.set({
@@ -177,7 +279,7 @@ async function sync(source = 'manual') {
         seenKeys: currentKeys,
         lastSync: { at, ok: true, count: currentKeys.length },
     });
-    await setBadge('ok', currentKeys.length);
+    await refreshBadge();
     await recordPoll(at, source, `✓ ${currentKeys.length} 張`);
     return result;
 }
@@ -214,7 +316,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 chrome.notifications.onClicked.addListener(async (id) => {
     const { baseUrl, jql } = await getSettings();
     if (!baseUrl) return;
-    const aggregate = id === 'batch' || id === 'test';
+    const aggregate = id === 'batch' || id === 'test' || id === 'missed';
     chrome.tabs.create({ url: aggregate ? filterUrl(baseUrl, jql) : issueUrl(baseUrl, id) });
     chrome.notifications.clear(id);
 });
@@ -227,6 +329,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
     if (msg?.type === 'testNotification') {
         sendTestNotification().then(sendResponse);
+        return true;
+    }
+    if (msg?.type === 'setMuted') {
+        setMuted(msg.muted).then(sendResponse);
         return true;
     }
 });

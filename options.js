@@ -126,7 +126,13 @@ testNotifyBtn.addEventListener('click', async () => {
     testNotifyBtn.disabled = true;
     const outcome = await chrome.runtime.sendMessage({ type: 'testNotification' });
 
-    if (outcome?.ok) {
+    if (outcome?.muted) {
+        showIn(
+            notifyResult,
+            'warn',
+            '目前靜音中，這則測試通知已放進待補清單——解除靜音時會跟著一起出現在錯過的通知裡。'
+        );
+    } else if (outcome?.ok) {
         showIn(
             notifyResult,
             'ok',
